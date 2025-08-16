@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DaVinci Resolve Fusion ノードエクスプローラー</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chosen Palette: Warm Neutrals (Stone, Teal) -->
+    <!-- Application Structure Plan: A dashboard-style SPA with a prominent search bar and a category-based sidebar for filtering. The main content area displays nodes as a responsive grid of cards. This structure was chosen to transform a long, static list into a dynamic, searchable reference tool, which is far more usable for the target audience of VFX artists who need to quickly find specific tools. The interactive filters (search + category) allow for rapid exploration and discovery. -->
+    <!-- Visualization & Content Choices: The primary content is the list of nodes. Goal: Organize & Inform. Presentation: A responsive grid of styled HTML cards. Interaction: Live text search and category filtering via JavaScript. Justification: This approach is optimal for presenting a large dataset of textual information in an easily scannable and filterable format. Cards are more visually appealing and flexible for varying text lengths than a rigid table. Library/Method: Vanilla JS for interactivity, Tailwind CSS for styling. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+        }
+        .active-filter {
+            background-color: #14B8A6; /* teal-500 */
+            color: white;
+            font-weight: 600;
+        }
+        .node-card {
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            -webkit-font-smoothing: subpixel-antialiased;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-stone-50 text-stone-800">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-stone-900">DaVinci Resolve Fusion ノードエクスプローラー</h1>
+            <p class="mt-2 text-stone-600">Fusionの全ノードをインタラクティブに検索・探索</p>
+        </header>
+
+        <div class="sticky top-0 z-10 bg-stone-50/80 backdrop-blur-sm py-4 mb-8">
+            <div class="relative">
+                <input type="text" id="searchInput" placeholder="ノード名 (日本語/英語/短縮語) で検索..." class="w-full p-4 pl-12 text-lg border-2 border-stone-200 rounded-full focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all duration-300 shadow-sm">
+                <svg class="absolute left-4 top-1/2 -translate-y-1/2 h-6 w-6 text-stone-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row gap-8">
+            <aside class="lg:w-1/4 xl:w-1/5">
+                <h2 class="text-xl font-bold mb-4 text-stone-700">カテゴリ</h2>
+                <div id="categoryFilters" class="flex flex-wrap lg:flex-col gap-2">
+                </div>
+            </aside>
+
+            <main class="lg:w-3/4 xl:w-4/5">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-stone-700">ノードリスト</h3>
+                    <p id="nodeCount" class="text-sm text-stone-500"></p>
+                </div>
+                <div id="nodeGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        const nodeData = [
+            { jp: "ACESトランスフォーム", en: "ACES Transform", short: "", cat: "カラー", desc: "ACES規格に基づき色空間を変換します。" },
+            { jp: "Alembicメッシュ3D", en: "Alembic Mesh 3D", short: "ABC", cat: "3D", desc: "Alembic (.abc) 形式の3Dメッシュを読み込みます。" },
+            { jp: "Auxコピー", en: "Copy Aux", short: "CpA", cat: "ユーティリティ", desc: "可視チャンネルと補助チャンネル間でデータをコピーします。" },
+            { jp: "Bスプライン", en: "BSpline", short: "BSp", cat: "マスク", desc: "Bスプライン曲線で滑らかなマスクを作成します。" },
+            { jp: "Cineon Log", en: "Cineon Log", short: "Log", cat: "カラー", desc: "Cineon Log形式とリニア色空間を相互に変換します。" },
+            { jp: "Copy Metadata", en: "Copy Metadata", short: "Meta", cat: "ユーティリティ", desc: "画像のメタデータをコピーまたは変更します。" },
+            { jp: "Corner Positioner", en: "Corner Positioner", short: "CPn", cat: "トランスフォーム", desc: "画像の四隅を固定してパースに合わせて変形させます。" },
+            { jp: "CubeMap", en: "CubeMap", short: "3Cu", cat: "3D", desc: "キューブマップテクスチャを作成または展開します。" },
+            { jp: "DCTL", en: "DCTL", short: "", cat: "カラー", desc: "DCTLスクリプトを使用してカスタムカラー変換を適用します。" },
+            { jp: "Duplicate", en: "Duplicate", short: "Dup", cat: "エフェクト", desc: "画像を複数複製し、配置や効果を調整します。" },
+            { jp: "DVE", en: "DVE", short: "", cat: "トランスフォーム", desc: "2D画像に3Dのような回転やZ軸移動を加えます。" },
+            { jp: "FBXメッシュ3D", en: "FBX Mesh 3D", short: "FBX", cat: "3D", desc: "FBX形式の3Dモデルを読み込みます。" },
+            { jp: "FBX書き出し", en: "FBX Exporter", short: "FBX", cat: "3D", desc: "Fusionの3DシーンをFBX形式で書き出します。" },
+            { jp: "Frame Average", en: "Frame Average", short: "Avg", cat: "時間", desc: "複数フレームを平均化し、長時間露光やノイズ除去効果を生みます。" },
+            { jp: "Gradient", en: "Gradient", short: "3Gd", cat: "ジェネレーター", desc: "線形や放射状など様々なグラデーションを生成します。" },
+            { jp: "Hot Spot", en: "Hot Spot", short: "Hot", cat: "エフェクト", desc: "レンズフレアやスポットライトのようなハイライト効果を作成します。" },
+            { jp: "JPEGダメージ", en: "JPEG Damage", short: "", cat: "エフェクト", desc: "JPEG圧縮によるブロックノイズや歪みをシミュレートします。" },
+            { jp: "LUT Cube Analyzer", en: "LUT Cube Analyzer", short: "LCA", cat: "カラー", desc: "カラーコレクションの結果から3D LUTファイルを生成します。" },
+            { jp: "LUT Cube Apply", en: "LUT Cube Apply", short: "LCP", cat: "カラー", desc: "3D LUTファイルを画像に適用します。" },
+            { jp: "LUT Cube Creator", en: "LUT Cube Creator", short: "LCC", cat: "カラー", desc: "LUT解析用のカラーキューブ画像を生成します。" },
+            { jp: "OCIO CDL変換", en: "OCIO CDL Transform", short: "OCD", cat: "カラー", desc: "OpenColorIOに基づきASC CDLカラー補正を適用します。" },
+            { jp: "OCIOカラースペース", en: "OCIO Colorspace", short: "OCC", cat: "カラー", desc: "OpenColorIOを使用して色空間を変換します。" },
+            { jp: "OCIOファイル変換", en: "OCIO File Transform", short: "OCFp", cat: "カラー", desc: "OCIO設定ファイルに基づき色空間を変換します。" },
+            { jp: "pBounce", en: "pBounce", short: "pBn", cat: "パーティクル", desc: "パーティクルが指定領域に衝突した際に跳ね返る挙動を設定します。" },
+            { jp: "pImageEmitter", en: "pImageEmitter", short: "pIE", cat: "パーティクル", desc: "画像の色や形状に基づいてパーティクルを放出します。" },
+            { jp: "pEmitter", en: "pEmitter", short: "pEm", cat: "パーティクル", desc: "パーティクルシステムの基本的な発生源です。" },
+            { jp: "pCustom", en: "pCustom", short: "pCu", cat: "パーティクル", desc: "数式を使ってパーティクルの挙動を自由に制御します。" },
+            { jp: "pCustomForce", en: "pCustomForce", short: "pCF", cat: "パーティクル", desc: "数式を使ってパーティクルにカスタムの力を加えます。" },
+            { jp: "pGradientForce", en: "pGradientForce", short: "pGF", cat: "パーティクル", desc: "グラデーションに基づいてパーティクルに力を加えます。" },
+            { jp: "pChangeStyle", en: "pChangeStyle", short: "pCS", cat: "パーティクル", desc: "条件に応じてパーティクルのスタイル（色、サイズなど）を変更します。" },
+            { jp: "pSpawn", en: "pSpawn", short: "pSp", cat: "パーティクル", desc: "既存のパーティクルから新しいパーティクルを生成（スポーン）させます。" },
+            { jp: "pPointForce", en: "pPointForce", short: "pPF", cat: "パーティクル", desc: "特定の点からパーティクルを引き寄せたり反発させたりします。" },
+            { jp: "pMerge", en: "pMerge", short: "pMg", cat: "パーティクル", desc: "複数のパーティクルシステムを一つに統合します。" },
+            { jp: "pRender", en: "pRender", short: "pRn", cat: "パーティクル", desc: "パーティクルシステムを2D画像としてレンダリングします。" },
+            { jp: "pTurbulence", en: "pTurbulence", short: "pTr", cat: "パーティクル", desc: "パーティクルに乱流のようなランダムな動きを加えます。" },
+            { jp: "pAvoid", en: "pAvoid", short: "pAv", cat: "パーティクル", desc: "パーティクルが指定した領域を避けるように動かします。" },
+            { jp: "pFriction", en: "pFriction", short: "pFr", cat: "パーティクル", desc: "パーティクルの動きに摩擦（抵抗）を加え、減速させます。" },
+            { jp: "pTangentForce", en: "pTangentForce", short: "pTF", cat: "パーティクル", desc: "パーティクルの進行方向に対して接線方向に力を加えます。" },
+            { jp: "pDirectionalForce", en: "pDirectionalForce", short: "pDF", cat: "パーティクル", desc: "特定の方向に一様な力をパーティクルに加えます。" },
+            { jp: "pKill", en: "pKill", short: "pKlp", cat: "パーティクル", desc: "指定した条件（領域、寿命など）でパーティクルを消滅させます。" },
+            { jp: "pVortex", en: "pVortex", short: "pVt", cat: "パーティクル", desc: "パーティクルに渦巻く力を加えます。" },
+            { jp: "pFlock", en: "pFlock", short: "pFl", cat: "パーティクル", desc: "鳥の群れのような、集団的な動きをシミュレートします。" },
+            { jp: "pFollow", en: "pFollow", short: "pFo", cat: "パーティクル", desc: "パーティクルが特定のパスやオブジェクトに追従するようにします。" },
+            { jp: "Rays", en: "Rays", short: "ClRs", cat: "エフェクト", desc: "画像から光線を放射させる効果を作成します。" },
+            { jp: "Booleans", en: "Booleans", short: "", cat: "マスク", desc: "複数のマスクを結合、減算、交差などのブール演算で組み合わせます。" },
+            { jp: "Ellipses", en: "Ellipse", short: "Elp", cat: "マスク", desc: "楕円形のマスクを作成します。" },
+            { jp: "Set Metadata", en: "Set Metadata", short: "SMeta", cat: "ユーティリティ", desc: "画像のメタデータを設定または変更します。" },
+            { jp: "Set Time Code", en: "Set Time Code", short: "TCMeta", cat: "ユーティリティ", desc: "クリップのタイムコードを設定します。" },
+            { jp: "Expands", en: "Expands", short: "", cat: "マスク", desc: "マスクの境界を拡張または縮小します。" },
+            { jp: "Grids", en: "Grids", short: "", cat: "ジェネレーター", desc: "グリッドパターンを生成します。" },
+            { jp: "Jitters", en: "Jitters", short: "", cat: "トランスフォーム", desc: "位置、サイズ、角度などにランダムな揺らぎを加えます。" },
+            { jp: "Merges", en: "Merges", short: "Mrg", cat: "コンポジット", desc: "前景と背景の画像を合成します。" },
+            { jp: "NGons", en: "NGon", short: "", cat: "マスク", desc: "多角形のマスクを作成します。" },
+            { jp: "Soften and Sharpen", en: "Soften and Sharpen", short: "sOut", cat: "エフェクト", desc: "画像のディテールを柔らかくしたり、シャープにしたりします。" },
+            { jp: "Outlines", en: "Outlines", short: "", cat: "エフェクト", desc: "画像の輪郭を抽出します。" },
+            { jp: "Rectangles", en: "Rectangles", short: "Rct", cat: "マスク", desc: "長方形のマスクを作成します。" },
+            { jp: "Renders", en: "Renders", short: "", cat: "3D", desc: "3Dシーンを2D画像としてレンダリングします。" },
+            { jp: "Stars", en: "Star", short: "", cat: "マスク", desc: "星形のマスクを作成します。" },
+            { jp: "Sticky Note", en: "Sticky Note", short: "Nte", cat: "ユーティリティ", desc: "ノードグラフにメモ（付箋）を残します。" },
+            { jp: "Transforms", en: "Transform", short: "Xf", cat: "トランスフォーム", desc: "位置、回転、スケールなど、基本的な2D変形を行います。" },
+            { jp: "Time Stretcher", en: "Time Stretcher", short: "TSt", cat: "時間", desc: "キーフレームアニメーション全体の長さを伸縮させます。" },
+            { jp: "TV", en: "TV", short: "", cat: "エフェクト", desc: "古いテレビのような走査線やノイズ効果を加えます。" },
+            { jp: "UVマップ3D", en: "UV Map 3D", short: "3UV", cat: "3D", desc: "3DオブジェクトのUVテクスチャ座標を操作します。" },
+            { jp: "Wireless Link", en: "Wireless Link", short: "Wire", cat: "ユーティリティ", desc: "ノード間を線で繋がずにワイヤレスで接続します。" },
+            { jp: "Zからワールドポジション", en: "Z to WorldPos", short: "Z2W", cat: "3D", desc: "Z深度情報からワールド座標を再構築します。" },
+            { jp: "Zから視差", en: "Z to Disparity", short: "Z2D", cat: "3D", desc: "Z深度情報からステレオ視差を生成します。" },
+            { jp: "うねり", en: "Vortex", short: "Vtx", cat: "エフェクト", desc: "画像に渦巻くような歪みを加えます。" },
+            { jp: "かすみの除去", en: "DeHaze", short: "", cat: "エフェクト", desc: "映像から霧やかすみを除去し、コントラストを改善します。" },
+            { jp: "アナグリフ", en: "Anaglyph", short: "Ana", cat: "3D", desc: "左右の目用の画像を赤青メガネ用の3D画像に変換します。" },
+            { jp: "アナログダメージ", en: "Analog Damage", short: "", cat: "エフェクト", desc: "古いビデオテープのような歪みやノイズをシミュレートします。" },
+            { jp: "アパーチャー回折", en: "Aperture Diffraction", short: "", cat: "エフェクト", desc: "カメラの絞りによって生じる光の回折現象をシミュレートします。" },
+            { jp: "アルファマットの縮小&拡大", en: "Alpha Matte Shrink and Grow", short: "", cat: "マスク", desc: "アルファチャンネルの領域を縮小または拡大します。" },
+            { jp: "アルファ乗算", en: "Alpha Multiply", short: "AMl", cat: "ユーティリティ", desc: "カラーチャンネルにアルファチャンネルを乗算（プリマルチプライ）します。" },
+            { jp: "アルファ除算", en: "Alpha Divide", short: "ADv", cat: "ユーティリティ", desc: "プリマルチプライされた画像からアルファチャンネルを除算します。" },
+            { jp: "アンシャープマスク", en: "Unsharp Mask", short: "USM", cat: "エフェクト", desc: "画像の輪郭を強調してシャープネスを高めます。" },
+            { jp: "アンダーレイ", en: "Underlay", short: "Und", cat: "ユーティリティ", desc: "ノードグラフの背景に色付きの領域を作成し、整理しやすくします。" },
+            { jp: "アンビエントオクルージョン", en: "Ambient Occlusion", short: "SSAO", cat: "3D", desc: "3Dオブジェクトの接触部分や窪みに影を追加し、リアリティを高めます。" },
+            { jp: "イメージプレーン", en: "Image Plane 3D", short: "3Im", cat: "3D", desc: "2D画像を3D空間内の平面オブジェクトとして配置します。" },
+            { jp: "ウォード", en: "Wand", short: "3Wd", cat: "3D", desc: "異方性反射（金属のヘアラインなど）を表現する3Dマテリアルです。" },
+            { jp: "ウルトラキーヤー", en: "Ultra Keyer", short: "UKy", cat: "キーヤー", desc: "高品質なクロマキー（グリーンバック合成）を実現します。" },
+            { jp: "エッジ検出", en: "Edge Detect", short: "", cat: "エフェクト", desc: "画像の輪郭を検出して表示します。" },
+            { jp: "エンボス", en: "Emboss", short: "", cat: "エフェクト", desc: "画像に浮き彫りのような立体的な効果を与えます。" },
+            { jp: "オプティカルフロー", en: "Optical Flow", short: "OF", cat: "時間", desc: "フレーム間のピクセルの動きをベクトルとして計算します。" },
+            { jp: "オーバーライド3D", en: "Override 3D", short: "3Ov", cat: "3D", desc: "3Dシーン内のオブジェクトの特定プロパティを上書きします。" },
+            { jp: "カスタムツール", en: "Custom Tool", short: "CT", cat: "ユーティリティ", desc: "数式を使って独自の画像処理ツールを作成します。" },
+            { jp: "カスタムフィルター", en: "Custom Filter", short: "CFlt", cat: "エフェクト", desc: "畳み込みカーネルを定義してカスタムフィルターを作成します。" },
+            { jp: "カスタム頂点3D", en: "Custom Vertex 3D", short: "3CV", cat: "3D", desc: "数式を使って3Dモデルの頂点を個別に操作します。" },
+            { jp: "カメラ3D", en: "Camera 3D", short: "3Cm", cat: "3D", desc: "3Dシーン内に仮想カメラを作成します。" },
+            { jp: "カメラシェイク", en: "Camera Shake", short: "CShk", cat: "エフェクト", desc: "手持ちカメラのような揺れをシミュレートします。" },
+            { jp: "カメラトラッカー", en: "Camera Tracker", short: "CTra", cat: "トラッカー", desc: "実写映像のカメラの動きを解析し、3D空間で再現します。" },
+            { jp: "カラーの反転", en: "Invert Color", short: "", cat: "カラー", desc: "画像の色を反転（ネガポジ反転）させます。" },
+            { jp: "カラーカーブ", en: "Color Curves", short: "CCv", cat: "カラー", desc: "トーンカーブを操作して色と明るさを調整します。" },
+            { jp: "カラーゲイン", en: "Color Gain", short: "Clr", cat: "カラー", desc: "ゲイン、ガンマ、彩度、色相を調整します。" },
+            { jp: "カラーコレクター", en: "Color Corrector", short: "CC", cat: "カラー", desc: "シャドウ、ミッド、ハイライト別に詳細な色補正を行います。" },
+            { jp: "カラーコンプレッサー", en: "Color Compressor", short: "", cat: "カラー", desc: "指定した色域を圧縮して、特定の色を目立たせたり抑えたりします。" },
+            { jp: "カラージェネレーター", en: "Color Generator", short: "", cat: "ジェネレーター", desc: "単色またはグラデーションのカラー画像を生成します。" },
+            { jp: "カラースペース", en: "Color Space", short: "CS", cat: "カラー", desc: "色空間とガンマの変換を行います。" },
+            { jp: "カラースペース変換", en: "Color Space Transform", short: "", cat: "カラー", desc: "異なる色空間やガンマ間で正確な変換を行います。" },
+            { jp: "カラーパレット", en: "Color Palette", short: "", cat: "ユーティリティ", desc: "画像内で使用されている色を分析し、パレットを作成します。" },
+            { jp: "カラーマトリックス", en: "Color Matrix", short: "CMx", cat: "カラー", desc: "行列演算を使ってRGBチャンネルを混合・変換します。" },
+            { jp: "キッチャー", en: "Catcher", short: "3Ca", cat: "3D", desc: "3Dプロジェクターからの投影を「受け止める」ためのマテリアルです。" },
+            { jp: "キャンバスカラー設定", en: "Set Canvas Color", short: "SCv", cat: "ユーティリティ", desc: "ビューワーの背景色を設定します。" },
+            { jp: "キーフレームストレッチャー", en: "Keyframe Strecher", short: "KfS", cat: "時間", desc: "クリップの長さに応じてキーフレームアニメーションを自動で伸縮させます。" },
+            { jp: "クックトランス", en: "CookTorrance", short: "3CT", cat: "3D", desc: "物理ベースのリアルな反射を表現する3Dマテリアルです。" },
+            { jp: "クリーンプレート", en: "Clean Plate", short: "CPl", cat: "キーヤー", desc: "キーイング対象から背景要素を取り除き、キーイング精度を高めます。" },
+            { jp: "クリップ", en: "Crop", short: "Crp", cat: "トランスフォーム", desc: "画像の範囲を切り抜きます。" },
+            { jp: "クロマキーヤー", en: "Chroma Keyer", short: "CKy", cat: "キーヤー", desc: "特定の色（緑や青など）を透過させます。" },
+            { jp: "グリッド", en: "Grid", short: "", cat: "ジェネレーター", desc: "グリッド（格子模様）を生成します。" },
+            { jp: "グリッドワープ", en: "Grid Warp", short: "Grd", cat: "トランスフォーム", desc: "グリッドを歪めることで画像を自由に変形させます。" },
+            { jp: "グレイン", en: "Grain", short: "Grn", cat: "エフェクト", desc: "フィルムのような粒子（グレイン）を追加します。" },
+            { jp: "グロー", en: "Glow", short: "Glo", cat: "エフェクト", desc: "画像の明るい部分を滲ませて光らせる効果を加えます。" },
+            { jp: "コマンド実行", en: "RunCommand", short: "Run", cat: "ユーティリティ", desc: "外部のコマンドやスクリプトを実行します。" },
+            { jp: "コントラストポップ", en: "Contrast Pop", short: "", cat: "エフェクト", desc: "画像のコントラストを強調し、ディテールを際立たせます。" },
+            { jp: "コンバイナー", en: "Combiner", short: "Com", cat: "コンポジット", desc: "複数の画像を様々なモードで結合します。" },
+            { jp: "サーフェストラッカー", en: "Surface Tracker", short: "", cat: "トラッカー", desc: "歪みや変形のある平面（布や顔など）を追跡します。" },
+            { jp: "シェーダー", en: "Shader", short: "Shd", cat: "3D", desc: "3Dオブジェクトの質感や光の反応を定義します。" },
+            { jp: "シャドウ", en: "Shadow", short: "Sh", cat: "エフェクト", desc: "オブジェクトに影を追加します。" },
+            { jp: "シャープ", en: "Sharpen", short: "Shrp", cat: "エフェクト", desc: "画像をシャープにし、輪郭をくっきりさせます。" },
+            { jp: "シャープエッジ", en: "Sharpen Edges", short: "", cat: "エフェクト", desc: "画像の輪郭部分のみをシャープにします。" },
+            { jp: "スケール", en: "Scale", short: "Scl", cat: "トランスフォーム", desc: "画像のサイズを変更します。" },
+            { jp: "スタイル変換", en: "Stylize", short: "", cat: "エフェクト", desc: "画像を絵画風などにスタイル変換します。" },
+            { jp: "ステレオアラインメント", en: "Stereo Align", short: "SA", cat: "3D", desc: "ステレオ3D映像の左右の目の位置を調整します。" },
+            { jp: "ステレオミックス", en: "Stereo Mix", short: "3SMM", cat: "3D", desc: "左右の目の画像をブレンドします。" },
+            { jp: "スピル除去", en: "Despill", short: "", cat: "キーヤー", desc: "クロマキー合成後に残る背景色の映り込み（スピル）を除去します。" },
+            { jp: "スプリッター", en: "Splitter", short: "Spl", cat: "ユーティリティ", desc: "1つの入力を複数の出力に分岐させます。" },
+            { jp: "スポットライト", en: "Spot Light", short: "3SL", cat: "3D", desc: "スポットライトのような指向性のある光源を3D空間に配置します。" },
+            { jp: "スミア", en: "Smear", short: "", cat: "エフェクト", desc: "画像を指でこすったように引き伸ばす効果を加えます。" },
+            { jp: "スムースモーション", en: "Smooth Motion", short: "SM", cat: "時間", desc: "カクカクした動きを滑らかに補間します。" },
+            { jp: "セイバー", en: "Saver", short: "SV", cat: "メディア", desc: "コンポジションの結果をファイルとして保存します。" },
+            { jp: "ソフトクリップ", en: "SoftClip", short: "3SC", cat: "カラー", desc: "ハイライトやシャドウのクリッピングを滑らかに行います。" },
+            { jp: "ソフトグロー", en: "Soft Glow", short: "SGlo", cat: "エフェクト", desc: "柔らかく拡散するグロー効果を加えます。" },
+            { jp: "タイム速度", en: "Time Speed", short: "TSpd", cat: "時間", desc: "クリップの再生速度を変更します（スロー/ファストモーション）。" },
+            { jp: "チャンネルブール", en: "Channel Booleans", short: "Bol", cat: "ユーティリティ", desc: "RGBAチャンネル間で加算、減算、乗算などの論理演算を行います。" },
+            { jp: "テキスト+", en: "Text+", short: "Txt+", cat: "ジェネレーター", desc: "高度なアニメーション機能を持つ2Dテキストを生成します。" },
+            { jp: "テキスト3D", en: "Text 3D", short: "3Txt", cat: "3D", desc: "立体的な3Dテキストを生成します。" },
+            { jp: "テクスチャー", en: "Texture", short: "Txr", cat: "3D", desc: "3Dオブジェクトにテクスチャを適用します。" },
+            { jp: "テクスチャー2D", en: "Texture 2D", short: "3Tx", cat: "3D", desc: "2D画像を3Dマテリアルのテクスチャとして使用します。" },
+            { jp: "テクスチャーポップ", en: "Texture Pop", short: "", cat: "エフェクト", desc: "テクスチャのディテールを強調します。" },
+            { jp: "テクスチャー変形", en: "Texture Transform", short: "3TT", cat: "3D", desc: "3Dオブジェクトに適用されたテクスチャを変形させます。" },
+            { jp: "ディゾルブ", en: "Dissolve", short: "DX", cat: "コンポジット", desc: "2つの画像をクロスフェードでブレンドします。" },
+            { jp: "ディティールの復元", en: "Detail Recovery", short: "", cat: "エフェクト", desc: "白飛びしたハイライト部分のディテールを復元します。" },
+            { jp: "デットピクセル修正", en: "Dead Pixel Fixer", short: "", cat: "エフェクト", desc: "カメラセンサーのデッドピクセル（欠陥画素）を修正します。" },
+            { jp: "デバンド", en: "Deband", short: "", cat: "エフェクト", desc: "グラデーションなどで発生する色の縞模様（バンディング）を滑らかにします。" },
+            { jp: "デフォーカス", en: "Defocus", short: "Dfo", cat: "エフェクト", desc: "被写界深度（ボケ）をリアルにシミュレートします。" },
+            { jp: "デルタキーヤー", en: "Delta Keyer", short: "DK", cat: "キーヤー", desc: "高度なクロマキー合成ツールです。" },
+            { jp: "デント", en: "Dent", short: "Dnt", cat: "エフェクト", desc: "画像に凹みや膨らみのような歪みを加えます。" },
+            { jp: "トゥイーン", en: "Tween", short: "Tw", cat: "アニメーション", desc: "2つのキーフレーム間を滑らかに補間します。" },
+            { jp: "トラッカー", en: "Tracker", short: "Tra", cat: "トラッカー", desc: "映像内の点の動きを追跡します。" },
+            { jp: "トレイル", en: "Trails", short: "Trls", cat: "エフェクト", desc: "動くオブジェクトに残像（トレイル）効果を加えます。" },
+            { jp: "ドリップ", en: "Drip", short: "", cat: "エフェクト", desc: "液体が滴るような歪みをシミュレートします。" },
+            { jp: "ドロップシャドウ", en: "Drop Shadow", short: "", cat: "エフェクト", desc: "オブジェクトにドロップシャドウ（影）を追加します。" },
+            { jp: "ノイズ除去", en: "Remove Noise", short: "RN", cat: "エフェクト", desc: "映像のノイズを低減します。" },
+            { jp: "ハイライト", en: "Highlight", short: "HiL", cat: "エフェクト", desc: "画像の明るい部分に光条（キラキラ）効果を加えます。" },
+            { jp: "ハレーション", en: "Halation", short: "", cat: "エフェクト", desc: "フィルム撮影で強い光の周りに発生するハレーションをシミュレートします。" },
+            { jp: "バンプマップ", en: "BumpMap", short: "3Bu", cat: "3D", desc: "3Dオブジェクトの表面に擬似的な凹凸を追加します。" },
+            { jp: "バンプマップ作成", en: "Create Bump Map", short: "CBu", cat: "3D", desc: "グレースケール画像からバンプマップを生成します。" },
+            { jp: "バーンアウェイ", en: "Burn Away", short: "", cat: "エフェクト", desc: "画像が燃え尽きるようなトランジション効果を作成します。" },
+            { jp: "パッチリプレイサー", en: "Patch Replacer", short: "", cat: "エフェクト", desc: "映像の一部を別の部分で置き換えて修正します。" },
+            { jp: "パノマップ", en: "PanoMap", short: "PaM", cat: "3D", desc: "360度パノラマ映像の投影方式を変換します。" },
+            { jp: "ビットマップ", en: "Bitmap", short: "Bmp", cat: "マスク", desc: "画像の輝度やチャンネルをマスクとして利用します。" },
+            { jp: "ビデオコラージュ", en: "Video Collage", short: "", cat: "エフェクト", desc: "複数のビデオをグリッド状に配置するコラージュを作成します。" },
+            { jp: "ビネット", en: "Vignette", short: "", cat: "エフェクト", desc: "画面の周辺を暗くまたは明るくする効果を加えます。" },
+            { jp: "ビューティ", en: "Beauty", short: "", cat: "エフェクト", desc: "肌を滑らかにするなど、人物を美しく見せる修正を行います。" },
+            { jp: "ファイルLUT", en: "File LUT", short: "FLUT", cat: "カラー", desc: "外部のLUTファイルを読み込んで適用します。" },
+            { jp: "ファストノイズ", en: "FastNoise", short: "FN", cat: "ジェネレーター", desc: "雲、煙、炎などの有機的なノイズパターンを高速に生成します。" },
+            { jp: "ファストノイズテクスチャー", en: "Fast Noise Texture", short: "3FN", cat: "3D", desc: "3D空間で機能するプロシージャルなノイズテクスチャを生成します。" },
+            { jp: "フィルター", en: "Filter", short: "Fltr", cat: "エフェクト", desc: "ソーベル、ラプラスなどの様々な畳み込みフィルターを適用します。" },
+            { jp: "フィルムグレイン", en: "Film Grain", short: "FGr", cat: "エフェクト", desc: "特定のフィルムストックをシミュレートしたリアルなグレインを追加します。" },
+            { jp: "フィルムダメージ", en: "Film Damage", short: "", cat: "エフェクト", desc: "古いフィルムの傷、汚れ、ちらつきなどをシミュレートします。" },
+            { jp: "フィールド", en: "Fields", short: "Flds", cat: "ユーティリティ", desc: "インターレース映像のフィールド処理を行います。" },
+            { jp: "フォグ", en: "Fog", short: "Fog", cat: "エフェクト", desc: "Z深度情報に基づいて2D画像に霧や靄を追加します。" },
+            { jp: "フォグ3D", en: "Fog 3D", short: "3Fog", cat: "3D", desc: "3Dシーン内にボリューム感のある霧を追加します。" },
+            { jp: "フォルスカラー", en: "False Color", short: "", cat: "ユーティリティ", desc: "画像の輝度レベルを色分けして表示し、露出を視覚化します。" },
+            { jp: "フォン", en: "Phong", short: "3Ph", cat: "3D", desc: "光沢のあるプラスチックのような質感を表現する基本的な3Dマテリアルです。" },
+            { jp: "フォールオフ", en: "Falloff", short: "3Fa", cat: "3D", desc: "視点からの角度によって2つのマテリアルをブレンドします。" },
+            { jp: "フリッカーの追加", en: "Flicker Addition", short: "", cat: "エフェクト", desc: "映像にちらつき（フリッカー）効果を加えます。" },
+            { jp: "フリッカー除去", en: "Deflicker", short: "", cat: "エフェクト", desc: "タイムラプス映像などのちらつきを除去します。" },
+            { jp: "フレームリプレイサー", en: "Frame Replacer", short: "", cat: "時間", desc: "特定のフレームを別のフレームに置き換えます。" },
+            { jp: "フレーム修復", en: "Repair Frame", short: "Rep", cat: "時間", desc: "破損したフレームを前後のフレームから補間して修復します。" },
+            { jp: "ブランキングフィル", en: "Blanking Fill", short: "", cat: "エフェクト", desc: "レターボックスの黒帯部分などを周囲の映像で埋めます。" },
+            { jp: "ブラー", en: "Blur", short: "Blur", cat: "エフェクト", desc: "画像をぼかします。" },
+            { jp: "ブラー(ガウス)", en: "Gaussian Blur", short: "", cat: "エフェクト", desc: "ガウス分布に基づいた滑らかなぼかしを適用します。" },
+            { jp: "ブラー(ズーム)", en: "Zoom Blur", short: "", cat: "エフェクト", desc: "ズームしたような放射状のモーションブラーを加えます。" },
+            { jp: "ブラー(ティルトシフト)", en: "Tilt-Shift Blur", short: "", cat: "エフェクト", desc: "ミニチュア写真のようなティルトシフト効果をシミュレートします。" },
+            { jp: "ブラー(プリズム)", en: "Prism Blur", short: "", cat: "エフェクト", desc: "プリズムを通したように色を分散させながらぼかします。" },
+            { jp: "ブラー(ボックス)", en: "Box Blur", short: "", cat: "エフェクト", desc: "シンプルなボックス状のぼかしを適用します。" },
+            { jp: "ブラー(モザイク)", en: "Mosaic Blur", short: "", cat: "エフェクト", desc: "画像にモザイク処理をかけます。" },
+            { jp: "ブラー(レンズ)", en: "Lens Blur", short: "", cat: "エフェクト", desc: "カメラレンズの絞り形状をシミュレートしたボケを生成します。" },
+            { jp: "ブラー(放射)", en: "Radial Blur", short: "", cat: "エフェクト", desc: "中心から放射状に広がるぼかしを加えます。" },
+            { jp: "ブラー(方向)", en: "Directional Blur", short: "DrBl", cat: "エフェクト", desc: "特定の方向に動いたようなモーションブラーを加えます。" },
+            { jp: "ブリン", en: "Blinn", short: "3Bl", cat: "3D", desc: "フォンを改良した、より自然なスペキュラハイライトを持つ3Dマテリアルです。" },
+            { jp: "プラズマ", en: "Plasma", short: "Plas", cat: "ジェネレーター", desc: "プラズマのようなアニメーションするノイズパターンを生成します。" },
+            { jp: "プロジェクター3D", en: "Projector 3D", short: "3Pj", cat: "3D", desc: "3D空間に画像を投影するプロジェクターを作成します。" },
+            { jp: "ベクトルディストーション", en: "Vector Distortion", short: "Dst", cat: "トランスフォーム", desc: "ベクトルマップ（モーションベクトルなど）に基づいて画像を歪ませます。" },
+            { jp: "ベクトルモーションブラー", en: "Vector Motion Blur", short: "VBl", cat: "エフェクト", desc: "オプティカルフローのベクトル情報に基づいて正確なモーションブラーを適用します。" },
+            { jp: "ベンダー3D", en: "Bender 3D", short: "3Bn", cat: "3D", desc: "3Dオブジェクトを曲げたり、ねじったりします。" },
+            { jp: "ペイント", en: "Paint", short: "Pnt", cat: "マスク", desc: "ベクターベースのペイントツールで、描画や修正、ロトスコープを行います。" },
+            { jp: "ホワイトバランス", en: "White Balance", short: "WB", cat: "カラー", desc: "画像のホワイトバランスを調整します。" },
+            { jp: "ボリュームフォグ", en: "Volume Fog", short: "VlF", cat: "エフェクト", desc: "XYZ位置情報に基づいてリアルなボリュームフォグを生成します。" },
+            { jp: "ボリュームマスク", en: "Volume Mask", short: "VlM", cat: "マスク", desc: "3D空間内にボリューム（立体）マスクを作成します。" },
+            { jp: "ポイントクラウド3D", en: "PointCloud 3D", short: "3PC", cat: "3D", desc: "3Dスキャンデータなどのポイントクラウドを扱います。" },
+            { jp: "ポイントライト", en: "Point Light", short: "3PL", cat: "3D", desc: "電球のように全方向に光を放つ光源を3D空間に配置します。" },
+            { jp: "マスクペイント", en: "Mask Paint", short: "PnM", cat: "マスク", desc: "ペイントツールでマスクを作成・編集します。" },
+            { jp: "マットコントロール", en: "Matte Control", short: "Mat", cat: "キーヤー", desc: "キーイングで作成したマット（アルファ）を調整・洗練させます。" },
+            { jp: "マテリアルマージ", en: "Material Merge", short: "3MM", cat: "3D", desc: "複数の3Dマテリアルを結合します。" },
+            { jp: "マテリアル置き換え3D", en: "Replace Material 3D", short: "3Rpl", cat: "3D", desc: "3Dオブジェクトのマテリアルを置き換えます。" },
+            { jp: "マンデルブロ", en: "Mandelbrot", short: "Man", cat: "ジェネレーター", desc: "マンデルブロ集合のフラクタル図形を生成します。" },
+            { jp: "マージ", en: "Merge", short: "Mrg", cat: "コンポジット", desc: "前景と背景の画像を合成します。" },
+            { jp: "マージ3D", en: "Merge 3D", short: "3Mg", cat: "3D", desc: "複数の3Dオブジェクトを一つの3Dシーンに統合します。" },
+            { jp: "ミラー", en: "Mirrors", short: "", cat: "エフェクト", desc: "画像を鏡のように反転させます。" },
+            { jp: "メディア入力", en: "Media In", short: "MI", cat: "メディア", desc: "タイムライン上のクリップをFusionに読み込みます。" },
+            { jp: "メディア出力", en: "Media Out", short: "MO", cat: "メディア", desc: "Fusionでの結果をタイムラインに出力します。" },
+            { jp: "モーショントレイル", en: "Motion Trails", short: "", cat: "エフェクト", desc: "動くオブジェクトに残像効果を加えます。" },
+            { jp: "モーションブラー", en: "Motion Blur", short: "", cat: "エフェクト", desc: "変形アニメーションに基づいてモーションブラーを生成します。" },
+            { jp: "ライトトリム", en: "Light Trim", short: "LT", cat: "3D", desc: "3Dライトの強度を調整します。" },
+            { jp: "ランクフィルター", en: "Rank Filter", short: "RFlt", cat: "エフェクト", desc: "近傍ピクセルの輝度ランクに基づいて処理を行うフィルターです。（メディアンなど）" },
+            { jp: "リサイズ", en: "Resize", short: "Rsz", cat: "トランスフォーム", desc: "画像の解像度を変更します。" },
+            { jp: "リップル", en: "Ripples", short: "", cat: "エフェクト", desc: "水面に広がる波紋のような歪みを加えます。" },
+            { jp: "リボン3D", en: "Ribbon 3D", short: "3Ri", cat: "3D", desc: "3D空間にリボンのような軌跡を描画します。" },
+            { jp: "ルマキーヤー", en: "Luma Keyer", short: "LKy", cat: "キーヤー", desc: "画像の輝度（明るさ）に基づいてキーイングします。" },
+            { jp: "レターボックス", en: "Letterbox", short: "Lbx", cat: "エフェクト", desc: "映像の上下に黒帯を追加し、アスペクト比を変更します。" },
+            { jp: "レンズ反射", en: "Lens Reflections", short: "", cat: "エフェクト", desc: "レンズ内で光が反射する現象をシミュレートします。" },
+            { jp: "レンズ歪み", en: "Lens Distort", short: "LENS", cat: "トランスフォーム", desc: "カメラレンズによる歪みを補正、または追加します。" },
+            { jp: "レンダラー3D", en: "Renderer 3D", short: "3Rn", cat: "3D", desc: "3Dシーンを2D画像としてレンダリング（描画）します。" },
+            { jp: "ロケーター3D", en: "Locator 3D", short: "3Lo", cat: "3D", desc: "3D空間内の位置を示すための目印（ロケーター）です。" },
+            { jp: "ローダー", en: "Loader", short: "LD", cat: "メディア", desc: "外部の画像ファイル（連番ファイル含む）を読み込みます。" },
+            { jp: "ワンド", en: "Wand", short: "Wnd", cat: "マスク", desc: "クリックしたピクセルと似た色の範囲を自動で選択するマスクツールです。" },
+            { jp: "ワープ", en: "Warper", short: "", cat: "トランスフォーム", desc: "画像を歪ませる様々なワープ効果を適用します。" },
+            { jp: "三角化3D", en: "Triangulate 3D", short: "3Tri", cat: "3D", desc: "3Dモデルのポリゴンを三角形に分割します。" },
+            { jp: "三角形", en: "Triangle", short: "", cat: "マスク", desc: "三角形のマスクを作成します。" },
+            { jp: "浸食/膨張", en: "Erode / Dilate", short: "ErDl", cat: "マスク", desc: "マスクの領域を侵食（縮小）または膨張（拡大）させます。" },
+            { jp: "光線", en: "Light Rays", short: "", cat: "エフェクト", desc: "光源から光が差し込むような効果（光芒）を作成します。" },
+            { jp: "全体のアラインメント", en: "Global Align", short: "GA", cat: "3D", desc: "複数の3Dオブジェクトをグローバル座標で整列させます。" },
+            { jp: "反射", en: "Reflect", short: "3RR", cat: "3D", desc: "3Dオブジェクトに反射マテリアルを適用します。" },
+            { jp: "可変ブラー", en: "VariBlur", short: "VBl", cat: "エフェクト", desc: "マスクや他の画像に基づいて、場所によってぼかしの強さが変わるブラーを適用します。" },
+            { jp: "四角形", en: "Rectangle", short: "Rct", cat: "マスク", desc: "長方形のマスクを作成します。" },
+            { jp: "変位", en: "Displace", short: "Dsp", cat: "トランスフォーム", desc: "ディスプレイスメントマップ画像の輝度に基づいて画像を歪ませます。" },
+            { jp: "変位3D", en: "Displace 3D", short: "3Di", cat: "3D", desc: "テクスチャに基づいて3Dオブジェクトの表面を実際に変形させます。" },
+            { jp: "変形", en: "Transform", short: "Xf", cat: "トランスフォーム", desc: "位置、回転、スケールなど、基本的な2D変形を行います。" },
+            { jp: "多角形", en: "Polygon", short: "Ply", cat: "マスク", desc: "頂点をクリックして多角形のマスクを作成します。" },
+            { jp: "定義域を指定", en: "Set Domain", short: "DoD", cat: "ユーティリティ", desc: "画像の処理範囲（Domain of Definition）を手動で設定します。" },
+            { jp: "差キーヤー", en: "Difference Keyer", short: "DfK", cat: "キーヤー", desc: "クリーンな背景プレートとの差分を利用してキーイングします。" },
+            { jp: "平行ライト", en: "Directional Light", short: "3DL", cat: "3D", desc: "太陽光のような平行な光源を3D空間に配置します。" },
+            { jp: "平面トラッカー", en: "Planar Tracker", short: "PTra", cat: "トラッカー", desc: "映像内の平面（壁や地面など）の動きを追跡します。" },
+            { jp: "平面変形", en: "Planar Transform", short: "PXf", cat: "トランスフォーム", desc: "平面トラッカーのデータに基づいて画像を変形させます。" },
+            { jp: "座標空間", en: "Coordinate Space", short: "CdS", cat: "トランスフォーム", desc: "画像の座標系を直交座標と極座標の間で変換します。" },
+            { jp: "形状3D", en: "Shape 3D", short: "3Sh", cat: "3D", desc: "立方体、球、円柱などの基本的な3D形状を生成します。" },
+            { jp: "抽象化", en: "Abstraction", short: "", cat: "エフェクト", desc: "画像を抽象画のように単純化します。" },
+            { jp: "接合3D", en: "Weld 3D", short: "3We", cat: "3D", desc: "近接する3Dモデルの頂点を結合（ウェルド）します。" },
+            { jp: "疑似カラー", en: "Pseudo Color", short: "PsCl", cat: "ユーティリティ", desc: "画像の輝度を疑似的な色で表示します。" },
+            { jp: "新しい視点", en: "New Eye", short: "NE", cat: "3D", desc: "ステレオ3D映像から新しい視点（カメラ位置）を生成します。" },
+            { jp: "日中の空", en: "DaySky", short: "DS", cat: "3D", desc: "リアルな日中の空と太陽光をシミュレートする環境を生成します。" },
+            { jp: "明度/コントラスト", en: "Brightness / Contrast", short: "BC", cat: "カラー", desc: "画像の明るさとコントラストを調整します。" },
+            { jp: "楕円形", en: "Ellipse", short: "Elp", cat: "マスク", desc: "楕円形のマスクを作成します。" },
+            { jp: "水彩画", en: "Watercolor", short: "", cat: "エフェクト", desc: "画像を水彩画風に変換します。" },
+            { jp: "法線置き換え3D", en: "Replace Normals 3D", short: "3RpN", cat: "3D", desc: "3Dオブジェクトの法線情報を置き換えます。" },
+            { jp: "深度ブラー", en: "Depth Blur", short: "DBl", cat: "エフェクト", desc: "Z深度情報に基づいて被写界深度をシミュレートします。" },
+            { jp: "深度マップ", en: "Depth Map", short: "", cat: "3D", desc: "Z深度情報をグレースケール画像として生成します。" },
+            { jp: "深度変更", en: "Change Depth", short: "CD", cat: "ユーティリティ", desc: "画像のビット深度を変更します。" },
+            { jp: "球マップ", en: "SphereMap", short: "3Spm", cat: "3D", desc: "画像を球体にマッピングして環境マップを作成します。" },
+            { jp: "球面スタビライザー", en: "Spherical Stabilizer", short: "", cat: "3D", desc: "360度映像の手ブレを補正します。" },
+            { jp: "環境ライト", en: "Ambient Light", short: "3AL", cat: "3D", desc: "シーン全体を均一に照らす環境光を配置します。" },
+            { jp: "立方体3D", en: "Cube 3D", short: "3Cb", cat: "3D", desc: "立方体の3D形状を生成します。" },
+            { jp: "範囲", en: "Ranges", short: "Rng", cat: "カラー", desc: "画像のトーン範囲（シャドウ、ミッド、ハイライト）を調整します。" },
+            { jp: "緯度/経度パッチャー", en: "LatLong Patcher", short: "LLP", cat: "3D", desc: "360度映像の一部をパッチ修正するためのツールです。" },
+            { jp: "置き換え3D", en: "Replicate 3D", short: "3Rep", cat: "3D", desc: "3Dオブジェクトを複製して配置します。" },
+            { jp: "背景", en: "Background", short: "BG", cat: "ジェネレーター", desc: "単色や透明の背景画像を生成します。" },
+            { jp: "自動ゲイン", en: "Auto Gain", short: "AG", cat: "カラー", desc: "画像のゲインを自動的に調整します。" },
+            { jp: "自動ダート除去", en: "Automatic Dirt Removal", short: "", cat: "エフェクト", desc: "フィルムのゴミや傷を自動で除去します。" },
+            { jp: "自動ドメイン", en: "Auto Domain", short: "ADoD", cat: "ユーティリティ", desc: "画像の処理範囲を自動で設定します。" },
+            { jp: "色収差の除去", en: "Chromatic Aberration Removal", short: "", cat: "エフェクト", desc: "レンズの色収差（色ずれ）を補正します。" },
+            { jp: "色域", en: "Gamut", short: "Gmt", cat: "カラー", desc: "色域（ガマット）の変換を行います。" },
+            { jp: "色域マッピング", en: "Gamut Mapping", short: "", cat: "カラー", desc: "ある色域を別の色域にマッピングする際の方法を指定します。" },
+            { jp: "色域リミッター", en: "Gamut Limiter", short: "", cat: "カラー", desc: "指定した色域外の色をクリッピングします。" },
+            { jp: "色相カーブ", en: "Hue Curves", short: "HCv", cat: "カラー", desc: "特定の色相の彩度や輝度をカーブで調整します。" },
+            { jp: "色順応", en: "Chromatic Adaptation", short: "", cat: "カラー", desc: "異なる光源下での色の見え方をシミュレート・補正します。" },
+            { jp: "複製3D", en: "Duplicate 3D", short: "3Dp", cat: "3D", desc: "3Dオブジェクトを複製します。" },
+            { jp: "視差", en: "Disparity", short: "Dis", cat: "3D", desc: "ステレオ3D映像の視差を生成・操作します。" },
+            { jp: "視差からZ", en: "Disparity To Z", short: "D2Z", cat: "3D", desc: "ステレオ視差からZ深度情報を生成します。" },
+            { jp: "走査線", en: "Scanlines", short: "", cat: "エフェクト", desc: "ブラウン管テレビのような走査線効果を加えます。" },
+            { jp: "遠近位置", en: "Perpective Positioner", short: "PPn", cat: "トランスフォーム", desc: "パースのついた平面の歪みを除去します。" },
+            { jp: "鉛筆スケッチ", en: "Pencil Sketch", short: "", cat: "エフェクト", desc: "画像を鉛筆スケッチ風に変換します。" }
+        ];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const nodeGrid = document.getElementById('nodeGrid');
+            const searchInput = document.getElementById('searchInput');
+            const categoryFilters = document.getElementById('categoryFilters');
+            const nodeCount = document.getElementById('nodeCount');
+
+            let activeCategory = 'すべて';
+
+            const categories = ['すべて', ...new Set(nodeData.map(node => node.cat))];
+
+            function setupCategories() {
+                categoryFilters.innerHTML = categories.map(cat => `
+                    <button class="category-btn w-full text-left px-4 py-2 rounded-lg transition-colors duration-200 hover:bg-teal-100 ${cat === 'すべて' ? 'active-filter' : ''}" data-category="${cat}">
+                        ${cat}
+                    </button>
+                `).join('');
+            }
+
+            function renderNodes(nodesToRender) {
+                if (nodesToRender.length === 0) {
+                    nodeGrid.innerHTML = `<p class="col-span-full text-center text-stone-500">該当するノードが見つかりません。</p>`;
+                    nodeCount.textContent = '0件';
+                    return;
+                }
+                
+                nodeGrid.innerHTML = nodesToRender.map(node => `
+                    <div class="node-card bg-white p-5 rounded-xl shadow-md hover:shadow-lg hover:-translate-y-1 transition-all duration-300 flex flex-col">
+                        <div class="flex-grow">
+                            <h3 class="text-xl font-bold text-stone-900">${node.jp}</h3>
+                            <p class="text-sm text-teal-600 font-semibold">${node.en} ${node.short ? `(${node.short})` : ''}</p>
+                            <p class="mt-2 text-stone-600">${node.desc}</p>
+                        </div>
+                        <div class="mt-4 pt-3 border-t border-stone-200">
+                           <span class="text-xs font-medium bg-stone-100 text-stone-600 px-2 py-1 rounded-full">${node.cat}</span>
+                        </div>
+                    </div>
+                `).join('');
+                nodeCount.textContent = `${nodesToRender.length}件`;
+            }
+
+            function filterAndRender() {
+                const searchTerm = searchInput.value.toLowerCase();
+                
+                let filteredNodes = nodeData;
+
+                if (activeCategory !== 'すべて') {
+                    filteredNodes = filteredNodes.filter(node => node.cat === activeCategory);
+                }
+
+                if (searchTerm) {
+                    filteredNodes = filteredNodes.filter(node => 
+                        node.jp.toLowerCase().includes(searchTerm) ||
+                        node.en.toLowerCase().includes(searchTerm) ||
+                        node.short.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                renderNodes(filteredNodes);
+            }
+
+            searchInput.addEventListener('input', filterAndRender);
+
+            categoryFilters.addEventListener('click', e => {
+                if (e.target.classList.contains('category-btn')) {
+                    document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active-filter'));
+                    e.target.classList.add('active-filter');
+                    activeCategory = e.target.dataset.category;
+                    filterAndRender();
+                }
+            });
+
+            setupCategories();
+            renderNodes(nodeData);
+            nodeCount.textContent = `${nodeData.length}件`;
+        });
+    </script>
+</body>
+</html>
